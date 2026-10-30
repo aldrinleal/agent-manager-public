@@ -1,0 +1,71 @@
+# agent-manager inventory. Copy to hosts.yaml (AGENTMGR_INVENTORY).
+#
+# A host is a connection method (user@host[:port], optionally through a jump
+# host) plus an allowlist of git checkouts the manager may touch. Nothing
+# outside `paths:` can ever be launched into or refreshed — the API takes a
+# path *name*, never a filesystem path.
+
+defaults:
+  identity: ~/.ssh/id_agentmgr      # dedicate a key; don't reuse your personal one
+  runner: claude-code
+  worktree_root: /srv/agent-workspaces
+  log_root: /srv/agent-logs
+  refresh: ff-only                  # ff-only | rebase | merge | fetch-only
+  capture: pipe-pane                # pipe-pane (tmux-only) | script (needs util-linux)
+
+hosts:
+  # --- the simple case: "username@host is enough" --------------------------
+  - name: devbox
+    address: dev@devbox
+    env:
+      # `claude` is typically a ~/.local/bin or npm install, and a
+      # tmux-spawned /bin/sh reads no rc file — without this the launch
+      # script exits 127. `agentmgr check` probes through this same env, so
+      # a mismatch shows up there rather than at 2am.
+      PATH: /home/dev/.local/bin:/usr/local/bin:/usr/bin:/bin
+    paths:
+      - name: customer-portal
+        dir: /home/dev/code/customer-portal
+        remote: origin
+        branch: main
+
+  # --- reached only through a bastion, on port 2200 ----------
+  - name: homelab
+    address: dev@localhost:2200
+    jump: bastion
+    env:
+      # `claude` is a per-user install; a tmux-spawned /bin/sh reads no rc file.
+      PATH: /home/dev/.local/bin:/usr/local/bin:/usr/bin:/bin
+    paths:
+      - name: notes-svc
+        dir: /home/dev/src/notes-svc
+      - name: api-kit
+        dir: /home/dev/src/api-kit
+        branch: master
+      - name: cli-kit
+        dir: /home/dev/src/cli-kit
+        workspace: inplace          # worktree (default) | inplace
+        allow_dirty: true           # let `refresh` run over local changes
+
+  # --- jump-only: never a launch target, so no paths ------------------------
+  - name: bastion
+    address: ubuntu@bastion.example.net
+    role: jump
+
+  # --- a workspace pod on the k3s cluster, reached through pods/exec --------
+  # No sshd, no key, no DNS: access is the agent-manager service account's
+  # pods/exec grant in this namespace, which is the SSH key's equivalent
+  # (SPEC.md §5.5). address, jump and identity do not apply here.
+  - name: ws-mise
+    transport: kubectl              # ssh (default) | kubectl
+    namespace: workspaces
+    pod: ws-mise-0                    # a StatefulSet's pod is <name>-0
+    container: workspace            # optional when the pod has one container
+    worktree_root: /home/agent/src/agent-worktrees
+    log_root: /home/agent/src/agent-logs
+    env:
+      PATH: /home/agent/.local/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+    paths:
+      - name: cli-kit
+        dir: /home/agent/src/cli-kit
+        branch: master

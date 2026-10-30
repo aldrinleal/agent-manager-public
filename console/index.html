@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>agent-manager</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f6f4; --panel: #fff; --ink: #1a1a18; --muted: #6b6b63;
+    --line: #e2e2dc; --accent: #b4552d; --ok: #2f7a4f; --warn: #a8761c; --dead: #8a8a80;
+    --blocked: #7a3fb0; --blocked-bg: rgba(122,63,176,.10);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --panel: #1f1f23; --ink: #e8e8e4; --muted: #96968c;
+      --line: #32323a; --accent: #e07a4d; --ok: #62b487; --warn: #d6a44a; --dead: #6a6a70;
+      --blocked: #c79af0; --blocked-bg: rgba(199,154,240,.14);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 var(--mono);
+    padding: env(safe-area-inset-top, 0) 16px env(safe-area-inset-bottom, 0);
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline;
+    padding: 18px 0 14px; border-bottom: 1px solid var(--line); margin-bottom: 18px;
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .spacer { flex: 1 1 auto; }
+  input, select, button {
+    font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  .wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 900px; }
+  th {
+    text-align: left; font-weight: 500; font-size: 11px; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--muted);
+    padding: 0 12px 8px 0; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:hover td { background: var(--panel); }
+  .task { font-weight: 600; }
+  .prompt { color: var(--muted); font-size: 12px; max-width: 34ch;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .state { font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .running { color: var(--ok); } .starting { color: var(--warn); }
+  .stale { color: var(--warn); }
+  .blocked { color: var(--blocked); }
+  tr.attn td { background: var(--blocked-bg); }
+  .waiting { color: var(--blocked); font-weight: 600; } .stopped { color: var(--dead); } .failed { color: var(--accent); }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+         background: currentColor; margin-right: 6px; vertical-align: middle; }
+  .actions { display: flex; gap: 6px; white-space: nowrap; }
+  .actions button, .actions a {
+    font-size: 12px; padding: 3px 7px; border: 1px solid var(--line);
+    border-radius: 4px; text-decoration: none; color: var(--ink); background: var(--panel);
+  }
+  .actions a[aria-disabled="true"] { opacity: .35; pointer-events: none; }
+  .muted { color: var(--muted); }
+  .note { color: var(--accent); font-size: 12px; }
+  #msg { padding: 10px 12px; border-radius: 6px; margin-bottom: 14px;
+         border: 1px solid var(--line); background: var(--panel); font-size: 13px; }
+  #msg.err { border-color: var(--accent); color: var(--accent); }
+  dialog {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    color: var(--ink); padding: 0; max-width: min(92vw, 900px); width: 100%;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog header { padding: 14px 16px; margin: 0; }
+  pre { margin: 0; padding: 0 16px 16px; max-height: 62vh; overflow: auto;
+        font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  footer { color: var(--muted); font-size: 12px; padding: 18px 0 28px; }
+  @media (max-width: 620px) { header { gap: 8px; } h1 { width: 100%; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>agent-manager <span id="counts"></span></h1>
+  <div class="spacer"></div>
+  <input id="token" type="password" placeholder="API token" size="18" autocomplete="off">
+  <select id="hostFilter"><option value="">all hosts</option></select>
+  <label class="muted"><input type="checkbox" id="activeOnly"> active only</label>
+  <button id="reload">Reload</button>
+</header>
+
+<div id="msg" hidden></div>
+
+<div class="wrap">
+  <table>
+    <thead><tr>
+      <th>Task</th><th>Runner</th><th>Host</th><th>Repo</th><th>Branch</th>
+      <th>State</th><th>Age</th><th></th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+
+<footer id="foot"></footer>
+
+<dialog id="logbox">
+  <header><strong id="logtitle"></strong> <button id="logclose" style="float:right">Close</button></header>
+  <pre id="logtext"></pre>
+</dialog>
+
+<script>
+const API = "/api/fleet/v1";
+const $ = id => document.getElementById(id);
+
+// localStorage is per-viewer and can throw (private windows, blocked site
+// data), so every access is guarded and the page works without it.
+const store = {
+  get(k) { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
+};
+
+$("token").value = store.get("agentmgr_token");
+$("token").addEventListener("change", e => store.set("agentmgr_token", e.target.value));
+
+function say(text, isError) {
+  const el = $("msg");
+  el.hidden = !text;
+  el.textContent = text || "";
+  el.classList.toggle("err", !!isError);
+}
+
+async function call(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: { "Authorization": "Bearer " + $("token").value,
+               "Content-Type": "application/json", ...(opts.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || (res.status + " " + res.statusText));
+  return body;
+}
+
+function age(iso) {
+  const secs = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (secs < 90) return Math.round(secs) + "s";
+  if (secs < 5400) return Math.round(secs / 60) + "m";
+  if (secs < 172800) return Math.round(secs / 3600) + "h";
+  return Math.round(secs / 86400) + "d";
+}
+
+let hostsLoaded = false;
+
+async function loadHosts() {
+  const { hosts } = await call("/hosts");
+  const sel = $("hostFilter");
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">all hosts</option>';
+  for (const h of hosts) {
+    if (h.role === "jump") continue;
+    const o = document.createElement("option");
+    o.value = h.name;
+    o.textContent = h.name + (h.check && !h.check.ok ? " (check failed)" : "");
+    sel.appendChild(o);
+  }
+  sel.value = keep;
+  hostsLoaded = true;
+
+  const bad = hosts.filter(h => h.check && !h.check.ok);
+  $("foot").textContent = bad.length
+    ? "preflight failing: " + bad.map(h => h.name + " — " + (h.check.note || "")).join(" · ")
+    : hosts.length + " host(s) in inventory";
+}
+
+function render(sessions) {
+  const tbody = $("rows");
+  tbody.textContent = "";
+
+  if (!sessions.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 8;
+    td.className = "muted";
+    td.textContent = "No sessions. Launch one with: agentmgr up <host>/<path> <task-id> --prompt=…";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const s of sessions) {
+    const tr = document.createElement("tr");
+    if (s.state === "blocked") tr.className = "attn";
+
+    const task = document.createElement("td");
+    const name = document.createElement("div");
+    name.className = "task";
+    name.textContent = s.task_id;
+    task.appendChild(name);
+    if (s.prompt_preview) {
+      const p = document.createElement("div");
+      p.className = "prompt";
+      p.title = s.prompt_preview;
+      p.textContent = s.prompt_preview;
+      task.appendChild(p);
+    }
+    if (s.note) {
+      const nt = document.createElement("div");
+      nt.className = "note";
+      nt.textContent = s.note;
+      task.appendChild(nt);
+    }
+    tr.appendChild(task);
+
+    for (const v of [s.runner, s.host, s.repo_name, s.branch]) {
+      const td = document.createElement("td");
+      td.textContent = v || "";
+      tr.appendChild(td);
+    }
+
+    const st = document.createElement("td");
+    st.className = "state " + s.state;
+    if (s.state === "blocked") st.title = s.note || "waiting for approval";
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    st.appendChild(dot);
+    st.appendChild(document.createTextNode(
+      s.state + (s.exit_status != null ? " (" + s.exit_status + ")" : "")));
+    tr.appendChild(st);
+
+    const ag = document.createElement("td");
+    ag.className = "muted";
+    ag.textContent = age(s.created_at);
+    tr.appendChild(ag);
+
+    const act = document.createElement("td");
+    const box = document.createElement("div");
+    box.className = "actions";
+
+    const open = document.createElement("a");
+    open.textContent = "open";
+    open.target = "_blank";
+    open.rel = "noopener";
+    if (s.remote_url) open.href = s.remote_url;
+    else open.setAttribute("aria-disabled", "true");
+    open.title = s.remote_url || "no Remote Control URL — use tmux attach";
+    box.appendChild(open);
+
+    const logBtn = document.createElement("button");
+    logBtn.textContent = "log";
+    logBtn.onclick = () => showLog(s);
+    box.appendChild(logBtn);
+
+    const killBtn = document.createElement("button");
+    killBtn.textContent = "kill";
+    killBtn.disabled = !["starting", "running", "stale", "blocked"].includes(s.state);
+    killBtn.onclick = () => kill(s);
+    box.appendChild(killBtn);
+
+    act.appendChild(box);
+    tr.appendChild(act);
+
+    tbody.appendChild(tr);
+  }
+}
+
+async function showLog(s) {
+  $("logtitle").textContent = s.host + "/" + s.repo_name + " — " + s.task_id;
+  $("logtext").textContent = "loading…";
+  $("logbox").showModal();
+  try {
+    const { log } = await call("/sessions/" + s.id + "/log?tail=400");
+    $("logtext").textContent = log || "(empty)";
+    $("logtext").scrollTop = $("logtext").scrollHeight;
+  } catch (e) {
+    $("logtext").textContent = "error: " + e.message;
+  }
+}
+
+async function kill(s) {
+  if (!confirm("Kill " + s.tmux_session + " on " + s.host + "?\n\nThe worktree (" + s.worktree + ") is kept.")) return;
+  try {
+    await call("/sessions/" + s.id, { method: "DELETE" });
+    say("killed " + s.tmux_session);
+    refresh();
+  } catch (e) {
+    say(e.message, true);
+  }
+}
+
+async function refresh() {
+  try {
+    if (!hostsLoaded) await loadHosts();
+
+    const params = new URLSearchParams();
+    if ($("hostFilter").value) params.set("host", $("hostFilter").value);
+    if ($("activeOnly").checked) params.set("active", "true");
+
+    const { sessions, count } = await call("/sessions?" + params);
+    render(sessions || []);
+
+    const live = (sessions || []).filter(s => ["starting", "running", "stale", "blocked"].includes(s.state)).length;
+    const waiting = (sessions || []).filter(s => s.state === "blocked").length;
+    $("counts").textContent = live + " active / " + count + " total";
+    if (waiting) {
+      const w = document.createElement("span");
+      w.className = "waiting";
+      w.textContent = "  ·  " + waiting + " waiting for you";
+      $("counts").appendChild(w);
+    }
+    say("");
+  } catch (e) {
+    say(e.message, true);
+  }
+}
+
+$("reload").onclick = () => { hostsLoaded = false; refresh(); };
+$("hostFilter").onchange = refresh;
+$("activeOnly").onchange = refresh;
+$("logclose").onclick = () => $("logbox").close();
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

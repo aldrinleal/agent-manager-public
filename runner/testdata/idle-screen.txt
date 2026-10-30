@@ -1,0 +1,10 @@
+● Write(blocked-probe.txt)
+  ⎿  Wrote 1 line to blocked-probe.txt
+      1 hi
+● I created blocked-probe.txt in the current directory. It contains the single
+  word hi.
+✻ Brewed for 3s · done 10:31 PM
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts
